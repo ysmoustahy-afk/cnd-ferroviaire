@@ -240,6 +240,10 @@
           <svg class="ic" viewBox="0 0 24 24"><path d="M3 3v18h18"></path><path d="M18 17V9"></path><path d="M13 17V5"></path><path d="M8 17v-3"></path></svg>
           <span>Rapport qualité</span>
         </button>
+        <button class="action-tile" id="actPvRer">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><polyline points="9 15 11 17 15 13"></polyline></svg>
+          <span>PV RER – Liaison châssis</span>
+        </button>
         <button class="action-tile admin-only" id="actComptes" style="display:none;">
           <svg class="ic" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
           <span>Gestion des comptes</span>
@@ -321,6 +325,7 @@
         <div class="zone-map" id="zoneGridWrap" style="display:none;">
           <div id="zoneGrid" class="zone-grid"></div>
         </div>
+        <p id="zoneNoCarto" style="display:none;font-size:12.5px;color:var(--amber);padding:6px 0;"></p>
         <p id="veUnavailable" style="display:none;font-size:13px;color:var(--muted);text-align:center;padding:16px 0;">Cartographie du véhicule d'extrémité (VE) pas encore disponible — elle sera ajoutée prochainement.</p>
         <div class="zone-current" id="zoneCurrent">Aucune zone sélectionnée</div>
       </div>
@@ -402,6 +407,14 @@
     </div>
   </section>
 
+  <section id="view-pvrer" class="view">
+    <div class="subheader">
+      <button class="icon-btn" id="pvBack"><svg class="ic" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+      <h2 id="pvTitle">PV RER NG</h2>
+    </div>
+    <div id="pvBody"></div>
+  </section>
+
   <section id="view-rapport" class="view">
     <div class="subheader">
       <button class="icon-btn" data-back="view-dashboard"><svg class="ic" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
@@ -444,6 +457,10 @@
     </div>
     <div class="card">
       <p style="font-size:12.5px;color:var(--muted);margin:0 0 12px;">Si un schéma change, remplace-le ici par une nouvelle photo. La mise à jour est envoyée automatiquement à toute l'équipe.</p>
+      <div class="field">
+        <label>Contrat / série</label>
+        <select id="cartoSerie"><option value="REGIO2N">REGIO2N</option><option value="RER NG">RER NG</option><option value="MF19">MF19</option><option value="MI20">MI20</option><option value="M7">M7</option><option value="Autre">Autre</option></select>
+      </div>
       <div class="field">
         <label>Type de véhicule</label>
         <select id="cartoVehType"><option value="VI">VI</option><option value="VE">VE</option></select>
@@ -498,6 +515,7 @@
   </div>
 </div>
 
+<div id="pvSheet" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;"><div id="pvSheetBox" style="position:absolute;left:0;right:0;bottom:0;max-height:90vh;overflow:auto;background:var(--bg);border-radius:16px 16px 0 0;padding:16px;"></div></div>
 <div id="toast" style="display:none;position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:12px 20px;border-radius:10px;font-size:13.5px;font-weight:600;z-index:30;max-width:85%;text-align:center;"></div>
 
 <div class="lightbox" id="lightbox"><img id="lightboxImg" src=""></div>
@@ -576,6 +594,7 @@ function showView(id){
   if(id === 'view-rapport') renderRapport();
   if(id === 'view-comptes') renderAccounts();
   if(id === 'view-carto-admin') renderCartoAdmin();
+  if(id === 'view-pvrer') renderPv();
 }
 document.querySelectorAll('[data-back]').forEach(b=>b.addEventListener('click', ()=>showView(b.dataset.back)));
 document.getElementById('actNewInspection').addEventListener('click', ()=>{
@@ -902,8 +921,13 @@ function renderZoneGrid(){
   const grid = document.getElementById('zoneGrid');
   if(!g){ wrap.style.display = 'none'; return; }
   wrap.style.display = 'block';
-  const defaultBg = (g.bg && ZONE_BG[g.bg]) ? ZONE_BG[g.bg] : '';
-  const bgUrl = getZoneBgOverride(selectedVehType, selectedZoneGroup) || defaultBg;
+  const bgUrl = zoneBgUrl(currentContractKey(), selectedVehType, selectedZoneGroup, g);
+  const ckNote = document.getElementById('zoneNoCarto');
+  if(ckNote){
+    const r = rames.find(x=>x.id===currentRameId);
+    ckNote.style.display = bgUrl ? 'none' : 'block';
+    ckNote.textContent = 'Cartographie ' + (r&&r.serie ? r.serie : '') + ' pas encore chargée pour cette zone — l\'administrateur peut l\'ajouter dans « Gestion cartographie ».';
+  }
   const colDisplay = g.colLabels || g.cols;
   let colHeadHtml = colDisplay.map(c=>`<div class="zone-headcell">${c}</div>`).join('');
   let rowHeadHtml = ZONE_ROWS.map(r=>`<div class="zone-headcell">${r}</div>`).join('');
@@ -1253,7 +1277,7 @@ function drawCartographies(doc, rame, ncForRame){
         });
 
         const imgY = colHY+4;
-        const bg = g.bg ? ZONE_BG[g.bg] : null;
+        const bg = zoneBgUrl(contractKey(rame && rame.serie), vt, gk, g) || null;
         if(bg){ try{ doc.addImage(bg, 'JPEG', cx+rowLabelW+2, imgY, imgW, imgH); }catch(e){} }
         doc.setFontSize(5.2); doc.setTextColor(90,90,90);
         ['1','2','3'].forEach((r,ri)=>{
@@ -1875,6 +1899,7 @@ async function syncFromCloud(){
       }
     }catch(e){}
     if(currentAccount) refreshAdminLine();
+    try{ pvMergeAll(docs); }catch(e){}
     if(typeof renderZoneGrid==='function' && selectedZoneGroup){ try{ renderZoneGrid(); }catch(e){} }
     if(currentAccount && currentAccount.role==='admin' && cloudAccountsExist===false){ cloudPushAccounts(); }
   }catch(e){ cloudOnline = false; }
@@ -1883,6 +1908,326 @@ async function syncFromCloud(){
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) syncFromCloud(); });
 setInterval(()=>{ if(!document.hidden) syncFromCloud(); }, 120000);
 // ===== fin synchronisation =====
+// ===== PV RER NG – Liaison châssis =====
+const PV_CODES=[['2001','Porosités'],['2002','Fissures'],['2003','Défauts de forme'],['2004','Mauvaise préparation de soudage'],['2005','Manque de fusion ou de pénétration'],['2006','Imperfections (coups d\'arc, défaut de bouclage)'],['2007','Défaut de reprise ou démarrage'],['2008','Manque de matière, gorge insuffisante'],['2009','Excès de meulage / boulage / sous-épaisseurs'],['2010','Projections'],['2011','Manque de soudure ou longueur insuffisante'],['2012','Caniveau, morsure'],['2013','Inclusion solide'],['2014','Imperfections TIG'],['2015','Imperfections de surface (MT ou PT)'],['2016','Imperfections volumiques (UT ou RT)']];
+const PV_SECTIONS=(function(){
+  const r=(a,b)=>{const o=[];for(let i=a;i<=b;i++)o.push(String(i));return o;};
+  const S=[]; const add=(id,title,welds,methods)=>S.push({id,title,welds,methods:methods||['VT','PT','MT']});
+  add('e1d','Ext 1 – Droite',r(1,19)); add('e1g','Ext 1 – Gauche',r(1,19));
+  add('e2g','Ext 2 – Gauche',r(1,19)); add('e2d','Ext 2 – Droite',r(1,19));
+  const zc=r(1,16).concat(r(23,28));
+  add('zc2d','Zone centrale Ext 2 – Droite',zc); add('zc1d','Zone centrale Ext 1 – Droite',zc);
+  add('zc2g','Zone centrale Ext 2 – Gauche',zc); add('zc1g','Zone centrale Ext 1 – Gauche',zc);
+  add('zcxd','Zone centrale face droite extérieur',['29']); add('zcxg','Zone centrale face gauche extérieur',['29']);
+  let inter=['Ext1·17','Ext1·18'];
+  for(let f=1;f<=8;f++){ inter=inter.concat(['F'+f+'·18','F'+f+'·19','F'+f+'·20']); }
+  inter=inter.concat(['21','22','Ext2·17','Ext2·18']);
+  add('zcid','Zone centrale face droite intérieur',inter); add('zcig','Zone centrale face gauche intérieur',inter);
+  const bi=r(4,12).map(w=>w==='12'?'12*':w), bm=['VT','VTI','PT','MT'];
+  add('b1ig','Bout ext 1 intérieur – côté gauche',bi,bm); add('b1id','Bout ext 1 intérieur – côté droit',bi,bm);
+  add('b2ig','Bout ext 2 intérieur – côté gauche',bi,bm); add('b2id','Bout ext 2 intérieur – côté droit',bi,bm);
+  const be=['12','13','14','15','16','17'];
+  add('b1eg','Bout ext 1 extérieur – Gauche',be); add('b1ed','Bout ext 1 extérieur – Droite',be);
+  add('b2eg','Bout ext 2 extérieur – Gauche',be); add('b2ed','Bout ext 2 extérieur – Droite',be);
+  return S;
+})();
+let pv=null, pvRame=null, pvUi={sec:null,final:false};
+function pvKey(id){ return 'cnd_pvrer:'+(id||currentRameId); }
+function pvLoad(){
+  let o=null; try{ o=JSON.parse(window.localStorage.getItem(pvKey())); }catch(e){}
+  const r=rames.find(x=>x.id===currentRameId)||{};
+  pv=o||{data:{},extra:{},head:{pln:'',eff:'',ing:r.ing||''},final:{},_t:0};
+  pv.data=pv.data||{}; pv.extra=pv.extra||{}; pv.head=pv.head||{}; pv.final=pv.final||{}; pv.final.insp=pv.final.insp||[{},{},{},{}];
+  pvRame=currentRameId;
+}
+let pvTimer=null;
+function pvSave(){
+  pv._t=Date.now();
+  try{ window.localStorage.setItem(pvKey(),JSON.stringify(pv)); }catch(e){}
+  clearTimeout(pvTimer);
+  const rid=currentRameId;
+  pvTimer=setTimeout(async()=>{
+    const remote=await cloudGet('pvrer_'+rid);
+    if(remote) pvMergeRemote(rid,remote);
+    let str=null; try{ str=window.localStorage.getItem(pvKey(rid)); }catch(e){}
+    if(!str) return;
+    const ok=await cloudSet('pvrer_'+rid,str);
+    if(!ok) showToast('Enregistré sur cet appareil seulement.');
+  },1500);
+}
+async function cloudGet(docId){
+  try{
+    const r=await fbFetch(FB_BASE+'/'+encodeURIComponent(docId)+'?key='+FB.apiKey);
+    if(!r.ok) return null;
+    const d=await r.json();
+    return d.fields&&d.fields.json?d.fields.json.stringValue:null;
+  }catch(e){ return null; }
+}
+function pvMergeRemote(rid,str){
+  let rem; try{ rem=JSON.parse(str); }catch(e){ return; }
+  let loc=null; try{ loc=JSON.parse(window.localStorage.getItem(pvKey(rid))); }catch(e){}
+  let m, changed=false;
+  if(!loc){ m=rem; changed=true; }
+  else{
+    m=loc;
+    m.data=m.data||{}; m.extra=m.extra||{};
+    Object.keys(rem.data||{}).forEach(s=>Object.keys(rem.data[s]).forEach(w=>Object.keys(rem.data[s][w]).forEach(me=>{
+      const rr=rem.data[s][w][me];
+      m.data[s]=m.data[s]||{}; m.data[s][w]=m.data[s][w]||{};
+      const lr=m.data[s][w][me];
+      if(!lr||(rr.t||0)>(lr.t||0)){ m.data[s][w][me]=rr; changed=true; }
+    })));
+    Object.keys(rem.extra||{}).forEach(s=>{
+      const cur=m.extra[s]||[]; const set=new Set(cur.concat(rem.extra[s]));
+      if(set.size!==cur.length){ m.extra[s]=Array.from(set); changed=true; }
+    });
+    if((rem._t||0)>(loc._t||0)){ m.head=rem.head; m.final=rem.final; m._t=rem._t; changed=true; }
+  }
+  if(!changed) return;
+  try{ window.localStorage.setItem(pvKey(rid),JSON.stringify(m)); }catch(e){}
+  if(rid===currentRameId && pv){ pvLoad(); if(document.getElementById('view-pvrer').classList.contains('active') && !document.getElementById('pvSheet').style.display.includes('block')) renderPv(); }
+}
+function pvMergeAll(docs){
+  Object.keys(docs).forEach(id=>{ if(id.indexOf('pvrer_')===0 && docs[id]) pvMergeRemote(id.slice(6),docs[id]); });
+}
+function pvWelds(sec){ return sec.welds.concat(pv.extra[sec.id]||[]); }
+function pvRec(sec,w,m){ return ((pv.data[sec.id]||{})[w]||{})[m]; }
+function pvSetRec(sec,w,m,rec){
+  pv.data[sec.id]=pv.data[sec.id]||{}; pv.data[sec.id][w]=pv.data[sec.id][w]||{};
+  rec.t=Date.now(); pv.data[sec.id][w][m]=rec;
+}
+function pvDef(r){ return r?((+r.lin||0)+(+r.arr||0)):0; }
+function pvWeldDone(sec,w){ return sec.methods.some(m=>{ const r=pvRec(sec,w,m); return r&&r.done; }); }
+function pvCtrl(){ return currentAccount?currentAccount.name:''; }
+
+function renderPv(){
+  const body=document.getElementById('pvBody'), title=document.getElementById('pvTitle');
+  if(!currentRameId){ body.innerHTML='<div class="card"><p style="font-size:14px;">Crée ou sélectionne d\'abord une rame (menu ☰ en haut à gauche).</p></div>'; title.textContent='PV RER NG'; return; }
+  if(pvRame!==currentRameId || !pv) pvLoad();
+  if(pvUi.final) return renderPvFinal(body,title);
+  if(pvUi.sec) return renderPvSection(body,title);
+  title.textContent='PV RER NG – Liaison châssis';
+  let h=`<div class="card"><h3>Rame ${escapeHtml(currentRameId)}</h3>
+    <div class="field"><label>PLN N°</label><input id="pvPln" value="${escapeHtml(pv.head.pln||'')}"></div>
+    <div class="field"><label>Effectivité N°</label><input id="pvEff" value="${escapeHtml(pv.head.eff||'')}"></div>
+    <div class="field"><label>N°ING</label><input id="pvIng" value="${escapeHtml(pv.head.ing||'')}"></div></div>`;
+  let totalD=0,totalW=0;
+  h+='<div class="card"><h3>Zones à contrôler</h3>';
+  PV_SECTIONS.forEach(sec=>{
+    const ws=pvWelds(sec); const d=ws.filter(w=>pvWeldDone(sec,w)).length; totalD+=d; totalW+=ws.length;
+    const pct=ws.length?Math.round(100*d/ws.length):0;
+    const nd=ws.reduce((a,w)=>a+sec.methods.reduce((b,m)=>b+pvDef(pvRec(sec,w,m)),0),0);
+    h+=`<div class="pv-sec" data-sec="${sec.id}" style="padding:12px 0;border-bottom:1px solid var(--border);cursor:pointer;">
+      <div style="display:flex;justify-content:space-between;gap:8px;"><b style="font-size:14px;">${escapeHtml(sec.title)}</b><span style="font-size:12.5px;color:${d===ws.length?'var(--green)':'var(--muted)'};font-weight:600;">${d}/${ws.length}${nd?` · <span style="color:var(--red)">${nd} déf.</span>`:''}</span></div>
+      <div style="height:4px;background:var(--surface-2);border-radius:2px;margin-top:8px;"><div style="height:4px;width:${pct}%;background:var(--green);border-radius:2px;"></div></div></div>`;
+  });
+  h+=`</div><div class="card"><div class="pv-sec" id="pvFinalBtn" style="cursor:pointer;display:flex;justify-content:space-between;"><b style="font-size:14px;">Aspect, statut final et validation qualité</b><span style="color:var(--muted)">›</span></div></div>
+    <div style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">Avancement : ${totalD}/${totalW} soudures contrôlées</div>
+    <button class="btn-amber" id="pvPdfBtn">Générer le PV (PDF)</button>`;
+  body.innerHTML=h;
+  [['pvPln','pln'],['pvEff','eff'],['pvIng','ing']].forEach(([id,k])=>{
+    const el=document.getElementById(id); el.addEventListener('input',()=>{ pv.head[k]=el.value.toUpperCase(); }); el.addEventListener('change',()=>{ pv.head[k]=el.value.toUpperCase(); pvSave(); });
+  });
+  body.querySelectorAll('.pv-sec[data-sec]').forEach(el=>el.addEventListener('click',()=>{ pvUi.sec=el.dataset.sec; renderPv(); window.scrollTo(0,0); }));
+  document.getElementById('pvFinalBtn').addEventListener('click',()=>{ pvUi.final=true; renderPv(); window.scrollTo(0,0); });
+  document.getElementById('pvPdfBtn').addEventListener('click',pvExportPdf);
+}
+function renderPvSection(body,title){
+  const sec=PV_SECTIONS.find(s=>s.id===pvUi.sec); title.textContent=sec.title;
+  let h=`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${sec.methods.map(m=>`<button class="btn-outline pv-bulk" data-m="${m}" style="width:auto;padding:8px 12px;font-size:12px;">Tout ${m} OK</button>`).join('')}</div>`;
+  h+='<div class="card" style="padding:6px 14px;">';
+  pvWelds(sec).forEach(w=>{
+    h+=`<div style="display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--border);">
+      <div class="pv-open mono" data-w="${escapeHtml(w)}" style="flex:1;font-size:16px;font-weight:700;cursor:pointer;">${escapeHtml(w)}</div>
+      ${sec.methods.map(m=>{
+        const r=pvRec(sec,w,m), d=pvDef(r); let bg='var(--surface-2)', col='var(--muted)', txt=m;
+        if(r&&r.done){ if(d>0){ bg='var(--red-bg)'; col='var(--red)'; txt=m+' · '+d; } else { bg='var(--green-bg)'; col='var(--green)'; txt=m+' ✓'; } }
+        return `<button class="pv-chip" data-w="${escapeHtml(w)}" data-m="${m}" style="background:${bg};color:${col};border:1px solid var(--border);border-radius:8px;padding:9px 10px;font-size:12.5px;font-weight:700;min-width:54px;cursor:pointer;">${txt}</button>`;
+      }).join('')}</div>`;
+  });
+  h+=`</div><button class="btn-outline" id="pvAddWeld">+ Ajouter une soudure</button>`;
+  body.innerHTML=h;
+  body.querySelectorAll('.pv-open').forEach(el=>el.addEventListener('click',()=>pvOpenSheet(sec,el.dataset.w)));
+  body.querySelectorAll('.pv-chip').forEach(el=>el.addEventListener('click',()=>{
+    const w=el.dataset.w,m=el.dataset.m,r=pvRec(sec,w,m);
+    if(r&&r.done&&pvDef(r)>0){ pvOpenSheet(sec,w); return; }
+    if(r&&r.done){ pvSetRec(sec,w,m,Object.assign({},r,{done:false,ctrl:''})); }
+    else{ pvSetRec(sec,w,m,{done:true,lin:0,arr:0,ech:(r&&r.ech)||'',stat:'',ctrl:pvCtrl()}); }
+    pvSave(); renderPv();
+  }));
+  body.querySelectorAll('.pv-bulk').forEach(el=>el.addEventListener('click',()=>{
+    const m=el.dataset.m; let n=0;
+    pvWelds(sec).forEach(w=>{ const r=pvRec(sec,w,m); if(!r||!r.done){ pvSetRec(sec,w,m,{done:true,lin:0,arr:0,ech:(r&&r.ech)||'',stat:'',ctrl:pvCtrl()}); n++; } });
+    pvSave(); renderPv(); showToast(n+' soudure(s) validée(s) en '+m+'.');
+  }));
+  document.getElementById('pvAddWeld').addEventListener('click',()=>{
+    const v=(prompt('Numéro de la soudure à ajouter :')||'').trim().toUpperCase();
+    if(!v) return;
+    if(pvWelds(sec).includes(v)){ showToast('Cette soudure existe déjà.'); return; }
+    pv.extra[sec.id]=(pv.extra[sec.id]||[]).concat([v]); pvSave(); renderPv();
+  });
+}
+function pvOpenSheet(sec,w){
+  const box=document.getElementById('pvSheetBox');
+  let h=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><b style="font-size:16px;">${escapeHtml(sec.title)} · soudure ${escapeHtml(w)}</b><button class="icon-btn" id="pvSheetX" style="font-size:20px;">✕</button></div>`;
+  sec.methods.forEach(m=>{
+    const r=pvRec(sec,w,m)||{};
+    h+=`<div class="card" data-m="${m}" style="padding:12px;">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;"><input type="checkbox" class="pv-done" ${r.done?'checked':''} style="width:20px;height:20px;"> ${m} effectué</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
+        <div class="field" style="margin:0"><label>Défauts linéaires</label><input type="number" min="0" inputmode="numeric" class="pv-lin" value="${r.lin||0}"></div>
+        <div class="field" style="margin:0"><label>Défauts arrondis</label><input type="number" min="0" inputmode="numeric" class="pv-arr" value="${r.arr||0}"></div>
+        <div class="field" style="margin:0"><label>Échantillonnage</label><select class="pv-ech"><option value="">—</option>${['OUI','NON'].map(o=>`<option ${r.ech===o?'selected':''}>${o}</option>`).join('')}</select></div>
+        <div class="field" style="margin:0"><label>Statut après retouche</label><select class="pv-stat"><option value="">—</option>${['OK','NOK'].map(o=>`<option ${r.stat===o?'selected':''}>${o}</option>`).join('')}</select></div>
+        <div class="field" style="margin:0"><label>Code du défaut</label><select class="pv-code"><option value="">—</option>${PV_CODES.map(c=>`<option value="${c[0]}" ${r.code===c[0]?'selected':''}>${c[0]} ${escapeHtml(c[1])}</option>`).join('')}</select></div>
+        <div class="field" style="margin:0"><label>Dimension (mm)</label><input class="pv-dim" inputmode="decimal" value="${escapeHtml(r.dim||'')}"></div>
+      </div></div>`;
+  });
+  h+='<button class="btn-amber" id="pvSheetOk">Enregistrer</button>';
+  box.innerHTML=h;
+  const sh=document.getElementById('pvSheet'); sh.style.display='block';
+  document.getElementById('pvSheetX').addEventListener('click',()=>{ sh.style.display='none'; });
+  document.getElementById('pvSheetOk').addEventListener('click',()=>{
+    box.querySelectorAll('.card[data-m]').forEach(c=>{
+      const m=c.dataset.m, old=pvRec(sec,w,m)||{};
+      const lin=Math.max(0,parseInt(c.querySelector('.pv-lin').value)||0), arr=Math.max(0,parseInt(c.querySelector('.pv-arr').value)||0);
+      let done=c.querySelector('.pv-done').checked; if(!done&&(lin||arr)) done=true;
+      const rec={done,lin,arr,ech:c.querySelector('.pv-ech').value,stat:c.querySelector('.pv-stat').value,code:c.querySelector('.pv-code').value,dim:c.querySelector('.pv-dim').value.trim(),ctrl:done?(old.ctrl||pvCtrl()):''};
+      if(done||old.t) pvSetRec(sec,w,m,rec);
+    });
+    sh.style.display='none'; pvSave(); renderPv();
+  });
+}
+function renderPvFinal(body,title){
+  title.textContent='Statut final et validation';
+  const f=pv.final;
+  if(!f.insp[0].nom && currentAccount){ f.insp[0].nom=currentAccount.name.toUpperCase(); }
+  const yn=(k,l)=>`<div class="field"><label>${l}</label><select data-fk="${k}"><option value="">—</option><option ${f[k]==='OUI'?'selected':''}>OUI</option><option ${f[k]==='NON'?'selected':''}>NON</option></select></div>`;
+  let h='<div class="card"><h3>Aspect</h3>'+yn('doc','Conformité de la documentation')+yn('trac','Information nécessaire à la traçabilité')+yn('iso5817','Soudure selon NF ISO EN 5817')+yn('iso17637','Contrôle visuel selon ISO 17637')+yn('ident','Identification effectuée')+'</div>';
+  h+='<div class="card"><h3>Statut final</h3>'+yn('conf','Conforme')+yn('confR','Conforme après retouche(s)')+yn('alerte','Accepté via Alerte')+`<div class="field"><label>N° Alerte</label><input data-fk="nAlerte" value="${escapeHtml(f.nAlerte||'')}"></div></div>`;
+  for(let i=0;i<4;i++){
+    const o=f.insp[i];
+    h+=`<div class="card"><h3>Inspecteur qualité ${i+1}</h3>`+[['nom','Nom et prénom'],['soc','Société'],['niv','Niveau'],['cert','N° de certification'],['meth','Méthodes (IV / PT / MT)'],['date','Date']].map(([k,l])=>`<div class="field"><label>${l}</label><input data-ik="${i}.${k}" value="${escapeHtml(o[k]||'')}"></div>`).join('')+'</div>';
+  }
+  body.innerHTML=h;
+  body.querySelectorAll('[data-fk]').forEach(el=>el.addEventListener('change',()=>{ f[el.dataset.fk]=el.value.toUpperCase(); pvSave(); }));
+  body.querySelectorAll('[data-ik]').forEach(el=>el.addEventListener('change',()=>{ const [i,k]=el.dataset.ik.split('.'); f.insp[+i][k]=el.value.toUpperCase(); pvSave(); }));
+}
+
+// ---- PDF ----
+function pvPageHead(doc,sub){
+  const W=297;
+  doc.setFillColor(178,26,26); doc.rect(10,8,W-20,13,'F');
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(9);
+  doc.text('PROCES-VERBAL CND LIAISON CHÂSSIS _ FACES GAUCHE ET DROITE APRES DRESSAGE DU CHAUDRON',13,13.5);
+  doc.setFontSize(8); doc.text('Contrat 317 – RER NG',13,18.5);
+  doc.setFillColor(255,255,255); doc.rect(W-96,8,86,13,'F');
+  doc.setTextColor(30,30,30); doc.setFontSize(7.5);
+  doc.text('PLN N° : '+(pv.head.pln||'__________'),W-94,12.2);
+  doc.text('Effectivité N° : '+(pv.head.eff||'__________'),W-94,16);
+  doc.text('N°ING : '+(pv.head.ing||'__________'),W-94,19.8);
+  doc.setTextColor(200,20,30); doc.setFontSize(13); doc.text('ALSTOM',W-38,17);
+  doc.setTextColor(30,30,30); doc.setFontSize(11); doc.setFont('helvetica','bold');
+  doc.text(sub,10,28);
+}
+function pvYn(v){ return v==='OUI'?'OUI [X]    NON [  ]':v==='NON'?'OUI [  ]    NON [X]':'OUI [  ]    NON [  ]'; }
+async function pvExportPdf(){
+  if(!window.jspdf){ showToast('Bibliothèque PDF indisponible.'); return; }
+  const btn=document.getElementById('pvPdfBtn'); if(btn){ btn.textContent='Génération…'; btn.disabled=true; }
+  try{
+    const { jsPDF }=window.jspdf;
+    const doc=new jsPDF({unit:'mm',format:'a4',orientation:'landscape'});
+    const W=297, tw=(W-20-4)/2;
+    const headRow=[['N°','Méthode','Nb défauts\nLinéaire','Nb défauts\nArrondie','Échantillon-\nnage','Statut après\nretouche','Contrôleur']];
+    const rowsFor=(sec,ws)=>{
+      const rows=[];
+      ws.forEach(w=>sec.methods.forEach((m,i)=>{
+        const r=pvRec(sec,w,m), d=r&&r.done; const row=[];
+        if(i===0) row.push({content:w,rowSpan:sec.methods.length,styles:{halign:'center',valign:'middle',fontStyle:'bold',fontSize:9,fillColor:[250,236,214]}});
+        row.push(m,d?String(+r.lin||0):'',d?String(+r.arr||0):'',d?(r.ech||''):'',d?(r.stat||''):'',d?(r.ctrl||''):'');
+        rows.push(row);
+      }));
+      return rows;
+    };
+    const tbl=(sec,ws,left)=>doc.autoTable({
+      head:headRow, body:rowsFor(sec,ws), startY:32, theme:'grid',
+      margin:{left:left?10:10+tw+4,right:left?W-10-tw:10},
+      tableWidth:tw,
+      styles:{fontSize:6.5,cellPadding:0.7,lineColor:[150,150,150],lineWidth:0.1,textColor:[20,20,20],valign:'middle'},
+      headStyles:{fillColor:[34,44,72],textColor:255,fontSize:6.2,halign:'center'},
+      columnStyles:{0:{cellWidth:11},1:{cellWidth:13},2:{halign:'center'},3:{halign:'center'},4:{halign:'center'},5:{halign:'center'}},
+      didParseCell:d=>{ if(d.section==='body'&&(d.column.index===2||d.column.index===3)&&parseFloat(d.cell.raw)>0){ d.cell.styles.textColor=[200,30,30]; d.cell.styles.fontStyle='bold'; } }
+    });
+    let first=true;
+    PV_SECTIONS.forEach(sec=>{
+      const ws=pvWelds(sec), perCol=Math.floor(33/sec.methods.length), perPage=perCol*2;
+      for(let i=0;i<ws.length;i+=perPage){
+        if(!first) doc.addPage(); first=false;
+        pvPageHead(doc,sec.title+(i>0?' (suite)':''));
+        const chunk=ws.slice(i,i+perPage);
+        tbl(sec,chunk.slice(0,perCol),true);
+        if(chunk.length>perCol) tbl(sec,chunk.slice(perCol),false);
+      }
+    });
+    // Caractérisation des indications
+    const rows=[];
+    PV_SECTIONS.forEach(sec=>pvWelds(sec).forEach(w=>sec.methods.forEach(m=>{
+      const r=pvRec(sec,w,m); if(!r||!r.done) return;
+      const d=pvDef(r); if(!d&&!r.code) return;
+      const c=PV_CODES.find(x=>x[0]===r.code);
+      rows.push([sec.title,w,m,String(+r.lin||0),String(+r.arr||0),c?c[0]+' '+c[1]:'',r.dim?r.dim+' mm':'']);
+    })));
+    if(!rows.length) rows.push(['Aucune indication non acceptable relevée','','','','','','']);
+    doc.addPage();
+    doc.autoTable({
+      head:[['Zone','Soudure','Méthode','Linéaire','Arrondie','Code du défaut','Dimension']], body:rows, startY:32, theme:'grid',
+      margin:{top:32,left:10,right:10},
+      styles:{fontSize:8,cellPadding:1.2,lineColor:[150,150,150],lineWidth:0.1},
+      headStyles:{fillColor:[178,26,26],textColor:255},
+      didDrawPage:()=>pvPageHead(doc,'Caractérisation des indications non acceptables')
+    });
+    // Page finale
+    const f=pv.final;
+    doc.addPage(); pvPageHead(doc,'Codes défauts soudages, aspect, statut final et validation qualité');
+    const codes=[]; for(let i=0;i<8;i++) codes.push([PV_CODES[i][1],PV_CODES[i][0],PV_CODES[i+8][1],PV_CODES[i+8][0]]);
+    doc.autoTable({head:[['Défauts','Codes','Défauts','Codes']],body:codes,startY:32,theme:'grid',margin:{left:10,right:10},
+      styles:{fontSize:7,cellPadding:0.9,lineColor:[150,150,150],lineWidth:0.1},headStyles:{fillColor:[90,130,200],textColor:255},columnStyles:{1:{cellWidth:16,halign:'center'},3:{cellWidth:16,halign:'center'}}});
+    const y2=doc.lastAutoTable.finalY+5;
+    doc.autoTable({head:[['ASPECT','']],body:[['Conformité de la documentation',pvYn(f.doc)],['Information nécessaire à la traçabilité',pvYn(f.trac)],['Soudure selon NF ISO EN 5817',pvYn(f.iso5817)],['Contrôle visuel selon ISO 17637',pvYn(f.iso17637)],['Identification effectuée',pvYn(f.ident)]],startY:y2,theme:'grid',margin:{left:10,right:W-10-tw},tableWidth:tw,
+      styles:{fontSize:7,cellPadding:0.9,lineColor:[150,150,150],lineWidth:0.1},headStyles:{fillColor:[34,44,72],textColor:255}});
+    const e1=doc.lastAutoTable.finalY;
+    doc.autoTable({head:[['STATUT FINAL','']],body:[['Conforme',pvYn(f.conf)],['Conforme après retouche(s)',pvYn(f.confR)],['Accepté via Alerte',pvYn(f.alerte)],['N° Alerte',f.nAlerte||'']],startY:y2,theme:'grid',margin:{left:10+tw+4,right:10},tableWidth:tw,
+      styles:{fontSize:7,cellPadding:0.9,lineColor:[150,150,150],lineWidth:0.1},headStyles:{fillColor:[34,44,72],textColor:255}});
+    const y3=Math.max(e1,doc.lastAutoTable.finalY)+5;
+    doc.autoTable({head:[['Validation qualité','Nom et prénom','Société','Niveau','N° de certification','Méthodes','Date']],
+      body:f.insp.map((o,i)=>['Inspecteur qualité '+(i+1),o.nom||'',o.soc||'',o.niv||'',o.cert||'',o.meth||'',o.date||'']),
+      startY:y3,theme:'grid',margin:{left:10,right:10},
+      styles:{fontSize:7.5,cellPadding:1.6,lineColor:[150,150,150],lineWidth:0.1},headStyles:{fillColor:[178,26,26],textColor:255}});
+    // pieds de page
+    const n=doc.getNumberOfPages();
+    for(let p=1;p<=n;p++){
+      doc.setPage(p); doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(120,120,120);
+      doc.text('Référence du document : 317M4000CC12 Version I · Date de révision : 27/07/2026 · Domaine d\'application : Alstom Crespin',10,204);
+      doc.text('Page '+p+'/'+n,W-10,204,{align:'right'});
+    }
+    const pdfBlob=doc.output('blob');
+    const filename='PV-RER-liaison-chassis-'+currentRameId+'.pdf';
+    try{
+      const downloads=await claude.use('downloads');
+      if(downloads){ await downloads.save({filename,data:pdfBlob}); showToast('PDF enregistré.'); } else throw new Error('x');
+    }catch(e){
+      const url=URL.createObjectURL(pdfBlob); const a=document.createElement('a'); a.href=url; a.download=filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    }
+  }catch(e){ showToast('Erreur de génération du PDF.'); console.error(e); }
+  finally{ if(btn){ btn.textContent='Générer le PV (PDF)'; btn.disabled=false; } }
+}
+document.getElementById('actPvRer').addEventListener('click',()=>{ pvUi={sec:null,final:false}; showView('view-pvrer'); });
+document.getElementById('pvBack').addEventListener('click',()=>{
+  if(pvUi.sec||pvUi.final){ pvUi={sec:null,final:false}; renderPv(); } else showView('view-dashboard');
+});
+// ===== fin PV RER =====
+
 
 function loadAccounts(){
   try{
@@ -1904,6 +2249,19 @@ function saveAccounts(push){
   }
 }
 
+function contractKey(serie){
+  if(!serie || serie==='REGIO2N') return '';
+  return String(serie).replace(/[^A-Za-z0-9]/g,'');
+}
+function currentContractKey(){
+  const r = rames.find(x=>x.id===currentRameId);
+  return contractKey(r && r.serie);
+}
+function zoneBgUrl(ck, vt, gk, g){
+  const ov = getZoneBgOverride(ck+vt, gk);
+  if(ov) return ov;
+  return (!ck && g && g.bg && ZONE_BG[g.bg]) ? ZONE_BG[g.bg] : '';
+}
 function getZoneBgOverride(vt, gk){
   if(!vt || !gk) return null;
   try{ return window.localStorage.getItem('cnd_zonebg_override:'+vt+':'+gk) || null; }catch(e){ return null; }
@@ -1960,6 +2318,7 @@ document.getElementById('copyAccountsBtn').addEventListener('click', async ()=>{
   catch(e){ showToast('Sélectionne et copie le texte manuellement.'); }
 });
 
+function cartoVt(){ return contractKey(document.getElementById('cartoSerie').value) + document.getElementById('cartoVehType').value; }
 function populateCartoZoneSelect(){
   const vt = document.getElementById('cartoVehType').value;
   const sel = document.getElementById('cartoZoneKey');
@@ -1969,14 +2328,16 @@ function populateCartoZoneSelect(){
 }
 function renderCartoPreview(){
   const vt = document.getElementById('cartoVehType').value;
+  const ck = contractKey(document.getElementById('cartoSerie').value);
   const gk = document.getElementById('cartoZoneKey').value;
   const groupDef = (VEHICLE_ZONE_GROUPS[vt]||{})[gk];
   const wrap = document.getElementById('cartoPreviewWrap');
   if(!groupDef){ wrap.innerHTML=''; return; }
-  const url = getZoneBgOverride(vt, gk) || (groupDef.bg ? ZONE_BG[groupDef.bg] : '');
+  const url = zoneBgUrl(ck, vt, gk, groupDef);
   wrap.innerHTML = url ? `<img src="${url}" style="max-width:100%;border-radius:8px;border:1px solid var(--border);">` : '<p style="font-size:12.5px;color:var(--muted);">Aucune image.</p>';
 }
 document.getElementById('cartoVehType').addEventListener('change', populateCartoZoneSelect);
+document.getElementById('cartoSerie').addEventListener('change', populateCartoZoneSelect);
 document.getElementById('cartoZoneKey').addEventListener('change', renderCartoPreview);
 let cartoPendingDataUrl = null;
 document.getElementById('cartoFileInput').addEventListener('change', (e)=>{
@@ -2000,7 +2361,7 @@ document.getElementById('cartoFileInput').addEventListener('change', (e)=>{
   reader.readAsDataURL(file);
 });
 document.getElementById('cartoSaveBtn').addEventListener('click', async ()=>{
-  const vt = document.getElementById('cartoVehType').value;
+  const vt = cartoVt();
   const gk = document.getElementById('cartoZoneKey').value;
   if(!cartoPendingDataUrl){ showToast('Choisis d\'abord une image.'); return; }
   const ok = await setZoneBgOverride(vt, gk, cartoPendingDataUrl);
@@ -2009,13 +2370,13 @@ document.getElementById('cartoSaveBtn').addEventListener('click', async ()=>{
   showToast(ok ? 'Zone mise à jour pour toute l\'équipe.' : 'Zone mise à jour sur cet appareil seulement (pas de connexion au serveur).');
 });
 document.getElementById('cartoResetBtn').addEventListener('click', async ()=>{
-  const vt = document.getElementById('cartoVehType').value;
+  const vt = cartoVt();
   const gk = document.getElementById('cartoZoneKey').value;
   const ok = await clearZoneBgOverride(vt, gk);
   cartoPendingDataUrl = null;
   document.getElementById('cartoFileInput').value = '';
   renderCartoPreview();
-  showToast(ok ? 'Image d\'origine restaurée pour toute l\'équipe.' : 'Image d\'origine restaurée sur cet appareil seulement.');
+  showToast(ok ? 'Image supprimée pour toute l\'équipe.' : 'Image d\'origine restaurée sur cet appareil seulement.');
 });
 function renderCartoAdmin(){ populateCartoZoneSelect(); }
 
